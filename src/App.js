@@ -1,45 +1,33 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  Plus, Target, Settings, Activity, X, Search 
+  Plus, Target, Settings, Activity, X, Search, Loader2 
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, 
   Tooltip, ResponsiveContainer 
 } from 'recharts';
 
-// --- BEREGNING AV KALORIER (BMR/TDEE) ---
+// --- BEREGNINGER ---
 const calculateMacros = (profile) => {
-  // Mifflin-St Jeor Formel
   const bmr = profile.gender === 'male'
     ? 10 * profile.currentWeight + 6.25 * profile.height - 5 * profile.age + 5
     : 10 * profile.currentWeight + 6.25 * profile.height - 5 * profile.age - 161;
 
-  const multipliers = { 
-    sedentary: 1.2,    // Stillesittende
-    light: 1.375,      // Litt aktiv
-    moderate: 1.55,    // Moderat
-    active: 1.725,     // Aktiv
-    veryActive: 1.9    // Veldig aktiv
-  };
-  
-  // Total energiforbruk (TDEE)
+  const multipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, veryActive: 1.9 };
   const tdee = bmr * (multipliers[profile.activityLevel] || 1.2);
-  
-  // Justering basert på mål (Ned/Opp/Hold)
   const adjustment = profile.weightGoal === 'lose' ? -500 : profile.weightGoal === 'gain' ? 300 : 0;
   const cals = Math.round(tdee + adjustment);
 
-  // Makrofordeling (Høyere protein på diett)
   const proteinMultiplier = profile.weightGoal === 'lose' ? 2.2 : profile.weightGoal === 'gain' ? 2.0 : 1.8;
   const protein = Math.round(profile.currentWeight * proteinMultiplier);
-  const fat = Math.round(profile.currentWeight * 0.9); // ca 0.9g fett per kg
+  const fat = Math.round(profile.currentWeight * 0.9);
   const carbs = Math.round((cals - (protein * 4 + fat * 9)) / 4);
 
   return { calories: cals, protein, carbs, fat };
 };
 
 export default function App() {
-  // --- STATE (Data som lagres) ---
+  // --- STATE ---
   const [userProfile, setUserProfile] = useState(() => {
     const saved = localStorage.getItem('userProfile');
     return saved ? JSON.parse(saved) : {
@@ -60,12 +48,16 @@ export default function App() {
   const [weightLog, setWeightLog] = useState(() => {
     const saved = localStorage.getItem('weightLog');
     return saved ? JSON.parse(saved) : [
-      { date: '01. Jan', weight: 82 }, { date: '15. Jan', weight: 81.2 }, { date: '30. Jan', weight: 80.5 }
+      { date: '01. Jan', weight: 82 }, { date: '15. Jan', weight: 81.2 }
     ];
   });
 
   const [showSettings, setShowSettings] = useState(false);
+  
+  // SØK STATE
   const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
   const [newWeight, setNewWeight] = useState("");
 
   // Auto-lagring
@@ -75,19 +67,59 @@ export default function App() {
     localStorage.setItem('weightLog', JSON.stringify(weightLog));
   }, [userProfile, todayLog, weightLog]);
 
+  // --- API SØK MOT OPEN FOOD FACTS ---
+  useEffect(() => {
+    const searchFood = async () => {
+      if (searchTerm.length < 2) {
+        setSearchResults([]);
+        return;
+      }
+      setIsSearching(true);
+      try {
+        const response = await fetch(
+          `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${searchTerm}&search_simple=1&action=process&json=1&page_size=5`
+        );
+        const data = await response.json();
+        
+        if (data.products) {
+          const mappedResults = data.products.map(p => ({
+            name: p.product_name || "Ukjent vare",
+            calories: Math.round(p.nutriments?.['energy-kcal_100g'] || 0),
+            protein: Math.round(p.nutriments?.proteins_100g || 0),
+            carbs: Math.round(p.nutriments?.carbohydrates_100g || 0),
+            fat: Math.round(p.nutriments?.fat_100g || 0),
+            brand: p.brands || ""
+          })).filter(p => p.calories > 0); // Filtrer bort ting uten kalori-info
+          setSearchResults(mappedResults);
+        }
+      } catch (error) {
+        console.error("Søk feilet:", error);
+      } finally {
+        setIsSearching(false);
+      }
+    };
+
+    // Vent 500ms etter at brukeren slutter å skrive før vi søker (debounce)
+    const timeoutId = setTimeout(() => {
+      searchFood();
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
+
   const stats = useMemo(() => calculateMacros(userProfile), [userProfile]);
 
-  // --- HANDLERS (Knapper og funksjoner) ---
   const addMeal = (meal) => {
     setTodayLog(prev => ({
       ...prev,
       calories: prev.calories + meal.calories,
-      protein: prev.protein + (meal.protein || 0),
-      carbs: prev.carbs + (meal.carbs || 0),
-      fat: prev.fat + (meal.fat || 0),
+      protein: prev.protein + meal.protein,
+      carbs: prev.carbs + meal.carbs,
+      fat: prev.fat + meal.fat,
       entries: [meal, ...prev.entries]
     }));
     setSearchTerm("");
+    setSearchResults([]);
   };
 
   const removeMeal = (index) => {
@@ -95,9 +127,9 @@ export default function App() {
     setTodayLog(prev => ({
       ...prev,
       calories: prev.calories - meal.calories,
-      protein: prev.protein - (meal.protein || 0),
-      carbs: prev.carbs - (meal.carbs || 0),
-      fat: prev.fat - (meal.fat || 0),
+      protein: prev.protein - meal.protein,
+      carbs: prev.carbs - meal.carbs,
+      fat: prev.fat - meal.fat,
       entries: prev.entries.filter((_, i) => i !== index)
     }));
   };
@@ -136,10 +168,8 @@ export default function App() {
 
       <main className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
         
-        {/* KOLONNE 1: STATUS OG LOGG */}
+        {/* KOLONNE 1 */}
         <div className="space-y-6">
-          
-          {/* Kalori Status Kort */}
           <section className="bg-[#161b22] border border-slate-800 rounded-2xl p-6 shadow-xl">
             <div className="flex justify-between items-end mb-4">
               <div>
@@ -155,7 +185,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Makro Barene */}
             <div className="grid grid-cols-3 gap-3 mt-6">
               {[
                 { label: 'Protein', val: todayLog.protein, max: stats.protein, color: 'bg-blue-500' },
@@ -175,40 +204,46 @@ export default function App() {
             </div>
           </section>
 
-          {/* Søkefelt (MED Z-INDEX FIX) */}
+          {/* SØKEFELT MED EKTE API */}
           <div className="relative z-50">
             <div className="relative group">
               <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                <Search className="text-slate-500" size={18} />
+                {isSearching ? <Loader2 className="animate-spin text-blue-500" size={18}/> : <Search className="text-slate-500" size={18} />}
               </div>
               <input 
                 type="text"
-                placeholder="Legg til mat (f.eks 'Havregryn')..."
+                placeholder="Søk matvare (f.eks 'Banan', 'Grandiosa')..."
                 className="w-full bg-[#161b22] border border-slate-800 text-white rounded-xl py-4 pl-12 pr-4 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all shadow-lg"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
             
-            {/* Dropdown Resultater */}
-            {searchTerm.length > 1 && (
+            {/* RESULTATLISTE */}
+            {searchTerm.length > 1 && searchResults.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-2 bg-[#1c2128] border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-[100]">
-                <div className="p-2 text-xs text-slate-500 uppercase tracking-wider font-bold bg-[#161b22]">Søkeresultater</div>
-                <button 
-                  onClick={() => addMeal({ name: searchTerm, calories: 350, protein: 25, carbs: 30, fat: 10 })}
-                  className="w-full p-4 text-left hover:bg-blue-600/10 hover:text-blue-400 flex justify-between items-center border-b border-slate-800/50 transition-colors group"
-                >
-                  <div>
-                    <span className="font-bold text-white block group-hover:text-blue-400">{searchTerm}</span>
-                    <span className="text-xs text-slate-500">Standard porsjon • 350 kcal</span>
-                  </div>
-                  <Plus size={20} className="text-slate-600 group-hover:text-blue-400"/>
-                </button>
+                <div className="p-2 text-xs text-slate-500 uppercase tracking-wider font-bold bg-[#161b22]">
+                  Resultater fra Open Food Facts
+                </div>
+                {searchResults.map((item, idx) => (
+                  <button 
+                    key={idx}
+                    onClick={() => addMeal(item)}
+                    className="w-full p-4 text-left hover:bg-blue-600/10 hover:text-blue-400 flex justify-between items-center border-b border-slate-800/50 transition-colors group"
+                  >
+                    <div>
+                      <span className="font-bold text-white block group-hover:text-blue-400">
+                        {item.name} <span className="text-xs font-normal text-slate-500">({item.brand})</span>
+                      </span>
+                      <span className="text-xs text-slate-500">Per 100g: {item.calories} kcal • P:{item.protein}g K:{item.carbs}g F:{item.fat}g</span>
+                    </div>
+                    <Plus size={20} className="text-slate-600 group-hover:text-blue-400"/>
+                  </button>
+                ))}
               </div>
             )}
           </div>
 
-          {/* Dagens Logg */}
           <div className="space-y-2">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Dagens Logg</h3>
             {todayLog.entries.length === 0 ? (
@@ -234,10 +269,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* KOLONNE 2: VEKT OG MÅL */}
+        {/* KOLONNE 2 */}
         <div className="space-y-6">
-          
-          {/* Vektgraf */}
           <section className="bg-[#161b22] border border-slate-800 rounded-2xl p-6 shadow-lg">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Vektutvikling</h3>
@@ -260,14 +293,7 @@ export default function App() {
                     contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', color: '#fff' }}
                     itemStyle={{ color: '#60a5fa' }}
                   />
-                  <Area 
-                    type="monotone" 
-                    dataKey="weight" 
-                    stroke="#3b82f6" 
-                    strokeWidth={3} 
-                    fillOpacity={1} 
-                    fill="url(#colorWeight)" 
-                  />
+                  <Area type="monotone" dataKey="weight" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorWeight)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -286,7 +312,6 @@ export default function App() {
             </div>
           </section>
 
-          {/* Coach Anbefaling */}
           <section className="bg-gradient-to-br from-[#1e293b] to-[#0f172a] border border-slate-700/50 rounded-2xl p-6 relative overflow-hidden">
             <div className="absolute top-0 right-0 p-4 opacity-10">
               <Target size={100} />
