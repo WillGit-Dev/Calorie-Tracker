@@ -1,19 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Settings, Search, X, Loader2, ChevronRight, Barcode, Utensils, Trash2 } from 'lucide-react';
+import { Plus, Settings, Search, X, Loader2, ChevronRight, Barcode, Trash2, User, Flame, Target, TrendingUp } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
 export default function PocketCoachApp() {
-  // --- STATES ---
   const [showSettings, setShowSettings] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   
-  // Sjekk om brukeren har profil fra før (Innlogging/Husk meg)
-  const [hasProfile, setHasProfile] = useState(() => {
-    return localStorage.getItem('coach_profile') !== null;
-  });
+  const [hasProfile, setHasProfile] = useState(() => localStorage.getItem('coach_profile') !== null);
 
   const [profile, setProfile] = useState(() => {
     const saved = localStorage.getItem('coach_profile');
@@ -31,7 +27,6 @@ export default function PocketCoachApp() {
     { date: today, meals: [], totals: { kcal: 0, p: 0, c: 0, f: 0 } };
   });
 
-  // --- EFFEKTER ---
   useEffect(() => {
     if (hasProfile) localStorage.setItem('coach_profile', JSON.stringify(profile));
   }, [profile, hasProfile]);
@@ -40,44 +35,7 @@ export default function PocketCoachApp() {
     localStorage.setItem('coach_log', JSON.stringify(log));
   }, [log]);
 
-  // --- STREKKODELYSNING ---
-  useEffect(() => {
-    if (showScanner) {
-      const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
-      scanner.render(async (barcode) => {
-        scanner.clear();
-        setShowScanner(false);
-        fetchProductByBarcode(barcode);
-      });
-      return () => scanner.clear();
-    }
-  }, [showScanner]);
-
-  const fetchProductByBarcode = async (barcode) => {
-    setIsSearching(true);
-    try {
-      const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
-      const data = await res.json();
-      if (data.status === 1) {
-        const p = data.product;
-        const food = {
-          name: p.product_name_nb || p.product_name || 'Ukjent vare',
-          brand: p.brands || 'Ukjent merke',
-          kcal: Math.round(p.nutriments['energy-kcal_100g'] || 0),
-          p: Math.round(p.nutriments.proteins_100g || 0),
-          c: Math.round(p.nutriments.carbohydrates_100g || 0),
-          f: Math.round(p.nutriments.fat_100g || 0),
-          id: p._id
-        };
-        addMeal(food);
-      } else {
-        alert("Fant ikke produktet i databasen.");
-      }
-    } catch (err) { console.error(err); }
-    setIsSearching(false);
-  };
-
-  // --- LIVE MATSØK (Norsk database) ---
+  // --- MATSØK ---
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
       if (searchTerm.length > 2) {
@@ -104,25 +62,20 @@ export default function PocketCoachApp() {
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm]);
 
-  // --- LOGIKK ---
   const calculateMacros = (data = profile) => {
     const w = parseFloat(data.weight);
     const h = parseFloat(data.height);
     const a = parseFloat(data.age);
     if (!w || !h || !a) return;
-
     let bmr = (10 * w) + (6.25 * h) - (5 * a);
     bmr = data.gender === 'male' ? bmr + 5 : bmr - 161;
     let tdee = bmr * parseFloat(data.activity);
-    
     if (data.goal === 'lose') tdee -= 500;
     if (data.goal === 'gain') tdee += 300;
-
     const finalKcal = Math.round(tdee);
-    const protein = Math.round(w * 2.0); // 2g per kg vekt
+    const protein = Math.round(w * 2.0);
     const fat = Math.round(w * 0.8);
     const carbs = Math.round((finalKcal - (protein * 4) - (fat * 9)) / 4);
-
     const newProfile = { ...data, dailyGoal: finalKcal, pGoal: protein, cGoal: carbs, fGoal: fat };
     setProfile(newProfile);
     setHasProfile(true);
@@ -131,7 +84,7 @@ export default function PocketCoachApp() {
   const addMeal = (m) => {
     setLog(prev => ({
       ...prev,
-      meals: [...prev.meals, { ...m, logId: Date.now() }],
+      meals: [{ ...m, logId: Date.now() }, ...prev.meals],
       totals: {
         kcal: prev.totals.kcal + Number(m.kcal),
         p: prev.totals.p + Number(m.p),
@@ -157,93 +110,84 @@ export default function PocketCoachApp() {
     }));
   };
 
-  // --- VISNING: ONBOARDING ---
   if (!hasProfile) {
     return (
-      <div style={s.fullScreen}>
+      <div style={s.onboardingWrapper}>
         <div style={s.onboardCard}>
-          <h1 style={{textAlign:'center'}}>COACH<span style={{color:'#a8f88a'}}>PRO</span></h1>
-          <p style={s.subText}>Fyll ut din profil for å få tilpassede makromål.</p>
-          
-          <div style={s.row}>
-            <button style={{...s.btn, flex:1, background: profile.gender === 'male' ? '#a8f88a' : '#1a2233', color: profile.gender === 'male' ? '#000' : '#fff'}} onClick={() => setProfile({...profile, gender:'male'})}>Mann</button>
-            <button style={{...s.btn, flex:1, background: profile.gender === 'female' ? '#a8f88a' : '#1a2233', color: profile.gender === 'female' ? '#000' : '#fff'}} onClick={() => setProfile({...profile, gender:'female'})}>Kvinne</button>
-          </div>
-
-          <div style={s.row}>
-            <div style={{flex:1}}><label style={s.label}>Vekt (kg)</label><input type="number" style={s.input} value={profile.weight} onChange={e=>setProfile({...profile, weight:e.target.value})} /></div>
-            <div style={{flex:1}}><label style={s.label}>Høyde (cm)</label><input type="number" style={s.input} value={profile.height} onChange={e=>setProfile({...profile, height:e.target.value})} /></div>
-          </div>
-
-          <div style={s.row}>
-            <div style={{flex:1}}><label style={s.label}>Alder</label><input type="number" style={s.input} value={profile.age} onChange={e=>setProfile({...profile, age:e.target.value})} /></div>
-            <div style={{flex:1}}><label style={s.label}>Aktivitet</label>
-              <select style={s.input} value={profile.activity} onChange={e=>setProfile({...profile, activity:e.target.value})}>
-                <option value="1.2">Sofa-sliter</option>
-                <option value="1.375">Litt aktiv</option>
-                <option value="1.55">Moderat</option>
-                <option value="1.725">Veldig aktiv</option>
+          <div style={s.brandIcon}><Flame size={40} color="#a8f88a" /></div>
+          <h1 style={s.title}>Velkommen til <span style={{color:'#a8f88a'}}>CoachPro</span></h1>
+          <p style={s.subText}>Din AI-drevne ernæringscoach. La oss starte med deg.</p>
+          <div style={s.inputGrid}>
+            <div style={s.inputGroup}><label style={s.label}>Vekt (kg)</label><input type="number" style={s.input} value={profile.weight} onChange={e=>setProfile({...profile, weight:e.target.value})} placeholder="80" /></div>
+            <div style={s.inputGroup}><label style={s.label}>Høyde (cm)</label><input type="number" style={s.input} value={profile.height} onChange={e=>setProfile({...profile, height:e.target.value})} placeholder="180" /></div>
+            <div style={s.inputGroup}><label style={s.label}>Alder</label><input type="number" style={s.input} value={profile.age} onChange={e=>setProfile({...profile, age:e.target.value})} placeholder="25" /></div>
+            <div style={s.inputGroup}><label style={s.label}>Kjønn</label>
+              <select style={s.input} value={profile.gender} onChange={e=>setProfile({...profile, gender:e.target.value})}>
+                <option value="male">Mann</option><option value="female">Kvinne</option>
               </select>
             </div>
           </div>
-
-          <button style={{...s.btn, width:'100%', marginTop:20, background:'#a8f88a', color:'#000'}} onClick={() => calculateMacros()}>Start CoachPro <ChevronRight size={18}/></button>
+          <button style={s.primaryBtn} onClick={() => calculateMacros()}>Opprett min profil <ChevronRight size={18}/></button>
         </div>
       </div>
     );
   }
 
-  // --- VISNING: HOVEDAPP ---
   return (
-    <div style={s.container}>
-      <header style={s.header}>
-        <div style={s.content}>
-          <div style={s.rowBetween}>
-            <h1 style={s.logo}>COACH<span style={{color:'#a8f88a'}}>PRO</span></h1>
-            <div style={{display:'flex', gap:10}}>
-              <button onClick={() => setShowScanner(!showScanner)} style={s.iconBtn}><Barcode color="#a8f88a"/></button>
-              <button onClick={() => setShowSettings(!showSettings)} style={s.iconBtn}><Settings /></button>
-            </div>
-          </div>
+    <div style={s.appContainer}>
+      <nav style={s.navbar}>
+        <div style={s.navContent}>
+          <div style={s.logoGroup}><Flame size={24} color="#a8f88a" /><h1 style={s.logoText}>COACH<span style={{color:'#a8f88a'}}>PRO</span></h1></div>
+          <button onClick={() => setShowSettings(!showSettings)} style={s.navAction}><Settings size={20} /></button>
         </div>
-      </header>
+      </nav>
 
-      <main style={s.content}>
-        {showScanner && (
-          <div style={s.card}><div id="reader"></div><button style={s.btn} onClick={()=>setShowScanner(false)}>Lukk skanner</button></div>
-        )}
-
+      <main style={s.main}>
         {showSettings ? (
           <div style={s.card}>
-            <div style={s.rowBetween}><h2>Min Profil</h2><X onClick={()=>setShowSettings(false)} style={{cursor:'pointer'}}/></div>
-            <div style={{marginTop:20, display:'flex', flexDirection:'column', gap:15}}>
-              <label style={s.label}>Mitt Mål</label>
-              <select style={s.input} value={profile.goal} onChange={e=>setProfile({...profile, goal:e.target.value})}>
-                <option value="lose">Vektnedgang (-500 kcal)</option>
-                <option value="maintain">Vedlikehold</option>
-                <option value="gain">Muskelvekst (+300 kcal)</option>
-              </select>
-              <button style={{...s.btn, background:'#a8f88a', color:'#000'}} onClick={() => {calculateMacros(); setShowSettings(false);}}>Lagre endringer</button>
-              <button style={{...s.btn, background:'#f88a8a22', color:'#f88a8a'}} onClick={() => {localStorage.clear(); window.location.reload();}}>Slett alle data & Logg ut</button>
+            <div style={s.rowBetween}><h3>Innstillinger</h3><X onClick={()=>setShowSettings(false)} style={{cursor:'pointer'}}/></div>
+            <div style={s.settingList}>
+              <div style={s.inputGroup}><label style={s.label}>Mitt mål</label>
+                <select style={s.input} value={profile.goal} onChange={e=>setProfile({...profile, goal:e.target.value})}>
+                  <option value="lose">Vektnedgang (-500 kcal)</option>
+                  <option value="maintain">Vedlikehold</option>
+                  <option value="gain">Muskelvekst (+300 kcal)</option>
+                </select>
+              </div>
+              <button style={s.primaryBtn} onClick={() => {calculateMacros(); setShowSettings(false);}}>Oppdater coach</button>
+              <button style={s.dangerBtn} onClick={() => {localStorage.clear(); window.location.reload();}}>Slett alle data</button>
             </div>
           </div>
         ) : (
-          <div style={s.grid}>
-            <section style={s.col}>
-              <StatusCard log={log} profile={profile} />
-              
+          <div style={s.dashboardGrid}>
+            {/* VENSTRE KOLONNE: OVERSIKT */}
+            <section style={s.column}>
+              <div style={s.summaryCard}>
+                <div style={s.rowBetween}>
+                  <div><p style={s.labelCaps}>Gjenstår i dag</p><h2 style={s.hugeNumber}>{profile.dailyGoal - log.totals.kcal} <span style={s.unit}>kcal</span></h2></div>
+                  <Target size={32} color="#a8f88a" style={{opacity:0.5}} />
+                </div>
+                <div style={s.progressBar}><div style={{...s.progressFill, width: `${Math.min((log.totals.kcal / profile.dailyGoal) * 100, 100)}%`}}></div></div>
+                <div style={s.macroStats}>
+                  <MacroItem label="Protein" cur={log.totals.p} max={profile.pGoal} color="#a8f88a" />
+                  <MacroItem label="Karbs" cur={log.totals.c} max={profile.cGoal} color="#60a5fa" />
+                  <MacroItem label="Fett" cur={log.totals.f} max={profile.fGoal} color="#fbbf24" />
+                </div>
+              </div>
+
               <div style={s.card}>
-                <h3 style={s.cardT}>Legg til norsk mat</h3>
-                <div style={s.searchWrap}>
-                  <input style={s.input} placeholder="Søk Kiwi, Rema, merkevarer..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
-                  {isSearching && <Loader2 size={18} style={s.loader} className="spin" />}
+                <h3 style={s.labelCaps}>Legg til mat</h3>
+                <div style={s.searchContainer}>
+                  <Search size={18} style={s.searchIcon} />
+                  <input style={s.searchInput} placeholder="Søk f.eks 'Kylling'..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
+                  {isSearching && <Loader2 size={18} style={s.spinner} />}
                 </div>
                 {searchResults.length > 0 && (
-                  <div style={s.results}>
+                  <div style={s.resultsBox}>
                     {searchResults.map(f => (
-                      <div key={f.id} style={s.foodItem} onClick={() => addMeal(f)}>
-                        <div style={{flex:1}}><b>{f.name}</b><br/><small>{f.brand} - {f.kcal} kcal</small></div>
-                        <Plus size={18} color="#a8f88a" />
+                      <div key={f.id} style={s.foodResult} onClick={() => addMeal(f)}>
+                        <div><div style={s.foodName}>{f.name}</div><div style={s.foodSub}>{f.brand} • {f.kcal} kcal</div></div>
+                        <Plus size={20} color="#a8f88a" />
                       </div>
                     ))}
                   </div>
@@ -251,16 +195,25 @@ export default function PocketCoachApp() {
               </div>
             </section>
 
-            <section style={s.col}>
-              <div style={s.card}>
-                <h3 style={s.cardT}>Måltider i dag</h3>
-                {log.meals.length === 0 && <p style={s.subText}>Ingen mat logget ennå.</p>}
-                {log.meals.map(m => (
-                  <div key={m.logId} style={s.logItem}>
-                    <div><b>{m.name}</b><br/><small>{m.kcal} kcal</small></div>
-                    <Trash2 size={16} color="#6b7280" onClick={() => deleteMeal(m.logId)} style={{cursor:'pointer'}}/>
+            {/* HØYRE KOLONNE: LOGG */}
+            <section style={s.column}>
+              <div style={{...s.card, flex: 1}}>
+                <div style={s.rowBetween}><h3 style={s.labelCaps}>Måltider i dag</h3><TrendingUp size={16} color="#6b7280"/></div>
+                {log.meals.length === 0 ? (
+                  <div style={s.emptyState}>Ingen måltider ennå. Bruk søket for å starte dagen.</div>
+                ) : (
+                  <div style={s.logList}>
+                    {log.meals.map(m => (
+                      <div key={m.logId} style={s.logItem}>
+                        <div style={s.logInfo}>
+                          <div style={s.foodName}>{m.name}</div>
+                          <div style={s.logMacros}>{m.kcal} kcal • P: {m.p}g K: {m.c}g F: {m.f}g</div>
+                        </div>
+                        <button style={s.deleteBtn} onClick={() => deleteMeal(m.logId)}><Trash2 size={14} /></button>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             </section>
           </div>
@@ -270,59 +223,55 @@ export default function PocketCoachApp() {
   );
 }
 
-// --- SUBCOMPONENTS ---
-function StatusCard({ log, profile }) {
-  const rem = profile.dailyGoal - log.totals.kcal;
-  const pPct = Math.min((log.totals.p / profile.pGoal) * 100, 100);
+function MacroItem({ label, cur, max, color }) {
+  const pct = Math.min((cur / max) * 100, 100);
   return (
-    <div style={{...s.card, borderTop: '4px solid #a8f88a'}}>
-      <div style={s.rowBetween}>
-        <div>
-          <p style={s.label}>Kalorier gjenstår</p>
-          <h2 style={s.bigVal}>{rem}</h2>
-        </div>
-        <div style={{textAlign:'right'}}>
-          <p style={s.label}>Mål: {profile.dailyGoal}</p>
-          <div style={s.badge}>{profile.goal}</div>
-        </div>
-      </div>
-      <div style={s.macroGrid}>
-        <div style={s.mBox}><small>Protein</small><br/><b>{log.totals.p}g</b><div style={s.miniTrack}><div style={{...s.miniBar, width:`${pPct}%`}}></div></div></div>
-        <div style={s.mBox}><small>Karbs</small><br/><b>{log.totals.c}g</b></div>
-        <div style={s.mBox}><small>Fett</small><br/><b>{log.totals.f}g</b></div>
-      </div>
+    <div style={s.macroItem}>
+      <div style={s.rowBetween}><span style={{fontSize:11, color:'#9ca3af'}}>{label}</span><span style={{fontSize:11, fontWeight:'bold'}}>{cur}/{max}g</span></div>
+      <div style={s.miniBar}><div style={{...s.miniFill, width:`${pct}%`, background:color}}></div></div>
     </div>
   );
 }
 
-// --- STYLES ---
 const s = {
-  fullScreen: { height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0e1a' },
-  onboardCard: { background: '#161b2a', padding: '30px', borderRadius: '20px', border: '1px solid #2a313e', maxWidth: '400px', width: '90%' },
-  container: { minHeight: '100vh', background: '#0a0e1a', color: '#e8e6e1', fontFamily: 'sans-serif', paddingBottom:'50px' },
-  header: { background: '#161b2a', padding: '15px 0', borderBottom: '1px solid #2a313e', position:'sticky', top:0, zIndex:10 },
-  content: { maxWidth: '800px', margin: '0 auto', padding: '0 20px' },
-  logo: { fontSize: '1.2rem', fontWeight: 'bold', letterSpacing:'1px' },
-  badge: { fontSize: '10px', background: '#a8f88a22', color: '#a8f88a', padding: '2px 8px', borderRadius: '10px', textTransform:'uppercase' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', marginTop: '20px' },
-  col: { display: 'flex', flexDirection: 'column', gap: '20px' },
-  card: { background: '#161b2a', padding: '20px', borderRadius: '15px', border: '1px solid #2a313e' },
-  cardT: { fontSize: '0.7rem', color: '#6b7280', textTransform: 'uppercase', marginBottom: '15px', fontWeight:'bold' },
-  bigVal: { fontSize: '3rem', fontWeight: 'bold', margin:0 },
-  label: { fontSize: '0.75rem', color: '#6b7280', marginBottom: 5, display:'block' },
-  subText: { fontSize: '0.9rem', color: '#6b7280', textAlign:'center', marginBottom:20 },
-  input: { background: '#0f1419', border: '1px solid #2a313e', padding: '12px', borderRadius: '10px', color: 'white', width: '100%', boxSizing:'border-box' },
-  btn: { background: '#1a2233', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:5 },
-  searchWrap: { position: 'relative' },
-  loader: { position: 'absolute', right: 10, top: 13, color: '#a8f88a' },
-  results: { background: '#0f1419', marginTop: '5px', borderRadius: '10px', maxHeight: '250px', overflowY: 'auto', border: '1px solid #2a313e' },
-  foodItem: { padding: '12px', borderBottom: '1px solid #2a313e', display: 'flex', alignItems: 'center', cursor: 'pointer' },
-  logItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #2a313e' },
-  macroGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginTop:20 },
-  mBox: { background: '#0f1419', padding: '10px', borderRadius: '10px', textAlign: 'center', fontSize: '12px' },
-  miniTrack: { height: '3px', background: '#2a313e', borderRadius: '2px', marginTop: '5px' },
-  miniBar: { height: '100%', background: '#a8f88a', borderRadius: '2px' },
-  row: { display: 'flex', gap: '10px', marginBottom: 15 },
-  rowBetween: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  iconBtn: { background: '#1a2233', border: 'none', color: '#fff', cursor: 'pointer', padding:'8px', borderRadius:'8px' }
+  appContainer: { minHeight: '100vh', background: '#090b11', color: '#f3f4f6', fontFamily: 'Inter, system-ui, sans-serif' },
+  navbar: { background: '#111827', borderBottom: '1px solid #1f2937', padding: '12px 0', position: 'sticky', top: 0, zIndex: 50 },
+  navContent: { maxWidth: '1000px', margin: '0 auto', padding: '0 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  logoGroup: { display: 'flex', alignItems: 'center', gap: '8px' },
+  logoText: { fontSize: '1.1rem', fontWeight: '800', letterSpacing: '0.5px' },
+  navAction: { background: '#1f2937', border: 'none', color: '#9ca3af', padding: '8px', borderRadius: '10px', cursor: 'pointer' },
+  main: { maxWidth: '1000px', margin: '0 auto', padding: '24px 20px' },
+  dashboardGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' },
+  column: { display: 'flex', flexDirection: 'column', gap: '24px' },
+  card: { background: '#111827', borderRadius: '20px', padding: '20px', border: '1px solid #1f2937', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' },
+  summaryCard: { background: 'linear-gradient(135deg, #111827 0%, #1a2233 100%)', borderRadius: '24px', padding: '24px', border: '1px solid #1f2937', position: 'relative', overflow: 'hidden' },
+  hugeNumber: { fontSize: '3.5rem', fontWeight: '900', margin: '8px 0', letterSpacing: '-2px' },
+  unit: { fontSize: '1rem', color: '#6b7280', letterSpacing: '0' },
+  labelCaps: { fontSize: '0.7rem', color: '#9ca3af', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' },
+  progressBar: { height: '10px', background: '#1f2937', borderRadius: '10px', margin: '20px 0', overflow: 'hidden' },
+  progressFill: { height: '100%', background: '#a8f88a', borderRadius: '10px', transition: 'width 0.5s ease' },
+  macroStats: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginTop: '10px' },
+  macroItem: { display: 'flex', flexDirection: 'column', gap: '4px' },
+  miniBar: { height: '4px', background: '#1f2937', borderRadius: '2px' },
+  miniFill: { height: '100%', borderRadius: '2px' },
+  searchContainer: { position: 'relative', marginTop: '10px' },
+  searchIcon: { position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#6b7280' },
+  searchInput: { width: '100%', background: '#090b11', border: '1px solid #374151', borderRadius: '12px', padding: '12px 12px 12px 40px', color: '#fff', fontSize: '14px' },
+  resultsBox: { background: '#090b11', borderRadius: '12px', marginTop: '8px', maxHeight: '300px', overflowY: 'auto', border: '1px solid #1f2937' },
+  foodResult: { padding: '12px', borderBottom: '1px solid #1f2937', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' },
+  foodName: { fontSize: '14px', fontWeight: '600' },
+  foodSub: { fontSize: '11px', color: '#6b7280' },
+  logList: { marginTop: '15px', display: 'flex', flexDirection: 'column', gap: '10px' },
+  logItem: { background: '#1f2937', padding: '12px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  logMacros: { fontSize: '12px', color: '#a8f88a', marginTop: '2px' },
+  deleteBtn: { background: 'none', border: 'none', color: '#4b5563', cursor: 'pointer', padding: '5px' },
+  emptyState: { padding: '40px 0', textAlign: 'center', color: '#4b5563', fontSize: '14px' },
+  onboardingWrapper: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#090b11', padding: '20px' },
+  onboardCard: { background: '#111827', padding: '40px', borderRadius: '32px', border: '1px solid #1f2937', maxWidth: '450px', width: '100%', textAlign: 'center' },
+  brandIcon: { marginBottom: '20px' },
+  title: { fontSize: '2rem', fontWeight: '900', marginBottom: '10px' },
+  subText: { color: '#9ca3af', marginBottom: '30px' },
+  inputGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', textAlign: 'left' },
+  primaryBtn: { width: '100%', background: '#a8f88a', color: '#064e3b', border: 'none', padding: '16px', borderRadius: '14px', fontWeight: '800', fontSize: '1rem', cursor: 'pointer', marginTop: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
+  dangerBtn: { width: '100%', background: '#7f1d1d33', color: '#f87171', border: 'none', padding: '12px', borderRadius: '12px', cursor: 'pointer', marginTop: '10px' }
 };
