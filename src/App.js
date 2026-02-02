@@ -1,277 +1,332 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Settings, Search, X, Loader2, ChevronRight, Barcode, Trash2, User, Flame, Target, TrendingUp } from 'lucide-react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Plus, Target, Settings, TrendingDown, TrendingUp, Minus, Apple, Search, Loader2, X, ChevronRight, Trash2, Flame } from 'lucide-react';
 
-export default function PocketCoachApp() {
-  const [showSettings, setShowSettings] = useState(false);
-  const [showScanner, setShowScanner] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
+// --- LOGIKK ---
+const calculateMacros = (profile) => {
+  const bmr = profile.gender === 'male'
+    ? 10 * profile.currentWeight + 6.25 * profile.height - 5 * profile.age + 5
+    : 10 * profile.currentWeight + 6.25 * profile.height - 5 * profile.age - 161;
+
+  const multipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, veryActive: 1.9 };
+  const tdee = bmr * (multipliers[profile.activityLevel] || 1.2);
+
+  let adjustment = profile.weightGoal === 'lose' ? -500 : profile.weightGoal === 'gain' ? 300 : 0;
+  const cals = Math.round(tdee + adjustment);
   
-  const [hasProfile, setHasProfile] = useState(() => localStorage.getItem('coach_profile') !== null);
+  const proteinMultiplier = profile.weightGoal === 'lose' ? 2.2 : profile.weightGoal === 'gain' ? 2 : 1.8;
+  const protein = Math.round(profile.currentWeight * proteinMultiplier);
+  const fat = Math.round(profile.currentWeight * 0.9);
+  const carbs = Math.round((cals - (protein * 4 + fat * 9)) / 4);
+  
+  return { calories: cals, protein, fat, carbs };
+};
 
-  const [profile, setProfile] = useState(() => {
-    const saved = localStorage.getItem('coach_profile');
+export default function KaloriTracker() {
+  const [showSettings, setShowSettings] = useState(false);
+  const [userProfile, setUserProfile] = useState(() => {
+    const saved = localStorage.getItem('userProfile');
     return saved ? JSON.parse(saved) : {
-      weight: '', height: '', age: '', gender: 'male', 
-      activity: '1.2', goal: 'maintain', 
-      dailyGoal: 2000, pGoal: 150, cGoal: 200, fGoal: 60
+      dailyCalories: 2000, protein: 150, carbs: 200, fat: 67,
+      weightGoal: 'maintain', currentWeight: 75, targetWeight: 75,
+      height: 180, age: 30, gender: 'male', activityLevel: 'moderate'
     };
   });
 
-  const [log, setLog] = useState(() => {
-    const saved = localStorage.getItem('coach_log');
+  const [todayLog, setTodayLog] = useState(() => {
+    const saved = localStorage.getItem('todayLog');
     const today = new Date().toDateString();
-    return (saved && JSON.parse(saved).date === today) ? JSON.parse(saved) : 
-    { date: today, meals: [], totals: { kcal: 0, p: 0, c: 0, f: 0 } };
+    const parsed = saved ? JSON.parse(saved) : null;
+    return (parsed && parsed.date === today) ? parsed : { date: today, calories: 0, protein: 0, carbs: 0, fat: 0, entries: [] };
   });
 
-  useEffect(() => {
-    if (hasProfile) localStorage.setItem('coach_profile', JSON.stringify(profile));
-  }, [profile, hasProfile]);
+  const [weightLog, setWeightLog] = useState(() => {
+    const saved = localStorage.getItem('weightLog');
+    return saved ? JSON.parse(saved) : [];
+  });
 
-  useEffect(() => {
-    localStorage.setItem('coach_log', JSON.stringify(log));
-  }, [log]);
+  useEffect(() => { localStorage.setItem('userProfile', JSON.stringify(userProfile)); }, [userProfile]);
+  useEffect(() => { localStorage.setItem('todayLog', JSON.stringify(todayLog)); }, [todayLog]);
+  useEffect(() => { localStorage.setItem('weightLog', JSON.stringify(weightLog)); }, [weightLog]);
 
-  // --- MATSØK ---
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (searchTerm.length > 2) {
-        setIsSearching(true);
-        try {
-          const res = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${searchTerm}&search_simple=1&action=process&json=1&page_size=15&countries=Norway`);
-          const data = await res.json();
-          const formatted = data.products
-            .filter(p => p.nutriments && p.nutriments['energy-kcal_100g'])
-            .map(p => ({
-              name: p.product_name_nb || p.product_name || 'Ukjent vare',
-              brand: p.brands || 'Norge',
-              kcal: Math.round(p.nutriments['energy-kcal_100g']),
-              p: Math.round(p.nutriments.proteins_100g || 0),
-              c: Math.round(p.nutriments.carbohydrates_100g || 0),
-              f: Math.round(p.nutriments.fat_100g || 0),
-              id: p._id
-            }));
-          setSearchResults(formatted);
-        } catch (err) { console.error(err); }
-        setIsSearching(false);
-      } else { setSearchResults([]); }
-    }, 500);
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm]);
-
-  const calculateMacros = (data = profile) => {
-    const w = parseFloat(data.weight);
-    const h = parseFloat(data.height);
-    const a = parseFloat(data.age);
-    if (!w || !h || !a) return;
-    let bmr = (10 * w) + (6.25 * h) - (5 * a);
-    bmr = data.gender === 'male' ? bmr + 5 : bmr - 161;
-    let tdee = bmr * parseFloat(data.activity);
-    if (data.goal === 'lose') tdee -= 500;
-    if (data.goal === 'gain') tdee += 300;
-    const finalKcal = Math.round(tdee);
-    const protein = Math.round(w * 2.0);
-    const fat = Math.round(w * 0.8);
-    const carbs = Math.round((finalKcal - (protein * 4) - (fat * 9)) / 4);
-    const newProfile = { ...data, dailyGoal: finalKcal, pGoal: protein, cGoal: carbs, fGoal: fat };
-    setProfile(newProfile);
-    setHasProfile(true);
-  };
-
-  const addMeal = (m) => {
-    setLog(prev => ({
+  const handleAddMeal = (meal) => {
+    setTodayLog(prev => ({
       ...prev,
-      meals: [{ ...m, logId: Date.now() }, ...prev.meals],
-      totals: {
-        kcal: prev.totals.kcal + Number(m.kcal),
-        p: prev.totals.p + Number(m.p),
-        c: prev.totals.c + Number(m.c),
-        f: prev.totals.f + Number(m.f)
-      }
-    }));
-    setSearchTerm('');
-    setSearchResults([]);
-  };
-
-  const deleteMeal = (logId) => {
-    const mealToDelete = log.meals.find(m => m.logId === logId);
-    setLog(prev => ({
-      ...prev,
-      meals: prev.meals.filter(m => m.logId !== logId),
-      totals: {
-        kcal: prev.totals.kcal - mealToDelete.kcal,
-        p: prev.totals.p - mealToDelete.p,
-        c: prev.totals.c - mealToDelete.c,
-        f: prev.totals.f - mealToDelete.f
-      }
+      calories: prev.calories + Number(meal.calories),
+      protein: prev.protein + Number(meal.protein),
+      carbs: prev.carbs + Number(meal.carbs),
+      fat: prev.fat + Number(meal.fat),
+      entries: [{ ...meal, id: Date.now(), time: new Date().toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit' }) }, ...prev.entries]
     }));
   };
 
-  if (!hasProfile) {
-    return (
-      <div style={s.onboardingWrapper}>
-        <div style={s.onboardCard}>
-          <div style={s.brandIcon}><Flame size={40} color="#a8f88a" /></div>
-          <h1 style={s.title}>Velkommen til <span style={{color:'#a8f88a'}}>CoachPro</span></h1>
-          <p style={s.subText}>Din AI-drevne ernæringscoach. La oss starte med deg.</p>
-          <div style={s.inputGrid}>
-            <div style={s.inputGroup}><label style={s.label}>Vekt (kg)</label><input type="number" style={s.input} value={profile.weight} onChange={e=>setProfile({...profile, weight:e.target.value})} placeholder="80" /></div>
-            <div style={s.inputGroup}><label style={s.label}>Høyde (cm)</label><input type="number" style={s.input} value={profile.height} onChange={e=>setProfile({...profile, height:e.target.value})} placeholder="180" /></div>
-            <div style={s.inputGroup}><label style={s.label}>Alder</label><input type="number" style={s.input} value={profile.age} onChange={e=>setProfile({...profile, age:e.target.value})} placeholder="25" /></div>
-            <div style={s.inputGroup}><label style={s.label}>Kjønn</label>
-              <select style={s.input} value={profile.gender} onChange={e=>setProfile({...profile, gender:e.target.value})}>
-                <option value="male">Mann</option><option value="female">Kvinne</option>
-              </select>
-            </div>
-          </div>
-          <button style={s.primaryBtn} onClick={() => calculateMacros()}>Opprett min profil <ChevronRight size={18}/></button>
-        </div>
-      </div>
-    );
-  }
+  const deleteMeal = (id) => {
+    const meal = todayLog.entries.find(e => e.id === id);
+    setTodayLog(prev => ({
+      ...prev,
+      calories: prev.calories - meal.calories,
+      protein: prev.protein - meal.protein,
+      carbs: prev.carbs - meal.carbs,
+      fat: prev.fat - meal.fat,
+      entries: prev.entries.filter(e => e.id !== id)
+    }));
+  };
+
+  const syncRecommendations = () => {
+    const recs = calculateMacros(userProfile);
+    setUserProfile(prev => ({ ...prev, dailyCalories: recs.calories, protein: recs.protein, carbs: recs.carbs, fat: recs.fat }));
+  };
+
+  const progressPercentage = (current, target) => Math.min((current / target) * 100, 100);
 
   return (
-    <div style={s.appContainer}>
-      <nav style={s.navbar}>
-        <div style={s.navContent}>
-          <div style={s.logoGroup}><Flame size={24} color="#a8f88a" /><h1 style={s.logoText}>COACH<span style={{color:'#a8f88a'}}>PRO</span></h1></div>
-          <button onClick={() => setShowSettings(!showSettings)} style={s.navAction}><Settings size={20} /></button>
-        </div>
-      </nav>
+    <div style={s.appWrapper}>
+      <BackgroundDecor />
+      <Header onSettingsClick={() => setShowSettings(!showSettings)} />
 
-      <main style={s.main}>
-        {showSettings ? (
-          <div style={s.card}>
-            <div style={s.rowBetween}><h3>Innstillinger</h3><X onClick={()=>setShowSettings(false)} style={{cursor:'pointer'}}/></div>
-            <div style={s.settingList}>
-              <div style={s.inputGroup}><label style={s.label}>Mitt mål</label>
-                <select style={s.input} value={profile.goal} onChange={e=>setProfile({...profile, goal:e.target.value})}>
-                  <option value="lose">Vektnedgang (-500 kcal)</option>
-                  <option value="maintain">Vedlikehold</option>
-                  <option value="gain">Muskelvekst (+300 kcal)</option>
-                </select>
-              </div>
-              <button style={s.primaryBtn} onClick={() => {calculateMacros(); setShowSettings(false);}}>Oppdater coach</button>
-              <button style={s.dangerBtn} onClick={() => {localStorage.clear(); window.location.reload();}}>Slett alle data</button>
-            </div>
+      <div style={s.mainContainer}>
+        {!showSettings ? (
+          <div style={s.grid}>
+            {/* VENSTRE: STATUS */}
+            <section style={s.column}>
+              <ProgressCard log={todayLog} goals={userProfile} progressPercentage={progressPercentage} />
+              <AddMealWithSearch onAdd={handleAddMeal} />
+              <MealList entries={todayLog.entries} onDelete={deleteMeal} />
+            </section>
+
+            {/* HØYRE: VEKT & MÅL */}
+            <section style={s.column}>
+              <WeightCard profile={userProfile} setProfile={setUserProfile} weightLog={weightLog} setWeightLog={setWeightLog} />
+              <RecommendationCard profile={userProfile} onSync={syncRecommendations} />
+            </section>
           </div>
         ) : (
-          <div style={s.dashboardGrid}>
-            {/* VENSTRE KOLONNE: OVERSIKT */}
-            <section style={s.column}>
-              <div style={s.summaryCard}>
-                <div style={s.rowBetween}>
-                  <div><p style={s.labelCaps}>Gjenstår i dag</p><h2 style={s.hugeNumber}>{profile.dailyGoal - log.totals.kcal} <span style={s.unit}>kcal</span></h2></div>
-                  <Target size={32} color="#a8f88a" style={{opacity:0.5}} />
-                </div>
-                <div style={s.progressBar}><div style={{...s.progressFill, width: `${Math.min((log.totals.kcal / profile.dailyGoal) * 100, 100)}%`}}></div></div>
-                <div style={s.macroStats}>
-                  <MacroItem label="Protein" cur={log.totals.p} max={profile.pGoal} color="#a8f88a" />
-                  <MacroItem label="Karbs" cur={log.totals.c} max={profile.cGoal} color="#60a5fa" />
-                  <MacroItem label="Fett" cur={log.totals.f} max={profile.fGoal} color="#fbbf24" />
-                </div>
-              </div>
-
-              <div style={s.card}>
-                <h3 style={s.labelCaps}>Legg til mat</h3>
-                <div style={s.searchContainer}>
-                  <Search size={18} style={s.searchIcon} />
-                  <input style={s.searchInput} placeholder="Søk f.eks 'Kylling'..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
-                  {isSearching && <Loader2 size={18} style={s.spinner} />}
-                </div>
-                {searchResults.length > 0 && (
-                  <div style={s.resultsBox}>
-                    {searchResults.map(f => (
-                      <div key={f.id} style={s.foodResult} onClick={() => addMeal(f)}>
-                        <div><div style={s.foodName}>{f.name}</div><div style={s.foodSub}>{f.brand} • {f.kcal} kcal</div></div>
-                        <Plus size={20} color="#a8f88a" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* HØYRE KOLONNE: LOGG */}
-            <section style={s.column}>
-              <div style={{...s.card, flex: 1}}>
-                <div style={s.rowBetween}><h3 style={s.labelCaps}>Måltider i dag</h3><TrendingUp size={16} color="#6b7280"/></div>
-                {log.meals.length === 0 ? (
-                  <div style={s.emptyState}>Ingen måltider ennå. Bruk søket for å starte dagen.</div>
-                ) : (
-                  <div style={s.logList}>
-                    {log.meals.map(m => (
-                      <div key={m.logId} style={s.logItem}>
-                        <div style={s.logInfo}>
-                          <div style={s.foodName}>{m.name}</div>
-                          <div style={s.logMacros}>{m.kcal} kcal • P: {m.p}g K: {m.c}g F: {m.f}g</div>
-                        </div>
-                        <button style={s.deleteBtn} onClick={() => deleteMeal(m.logId)}><Trash2 size={14} /></button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </section>
+          <div style={s.card}>
+             <div style={{display:'flex', justifyContent:'space-between', marginBottom:'20px'}}>
+                <h2>Innstillinger</h2>
+                <X onClick={() => setShowSettings(false)} style={{cursor:'pointer'}} />
+             </div>
+             <div style={{display:'flex', flexDirection:'column', gap:'15px'}}>
+                <label>Vekt (kg)</label>
+                <input style={s.input} type="number" value={userProfile.currentWeight} onChange={e => setUserProfile({...userProfile, currentWeight: e.target.value})} />
+                <button style={s.primaryBtn} onClick={() => setShowSettings(false)}>Lagre</button>
+             </div>
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }
 
-function MacroItem({ label, cur, max, color }) {
+// --- NY KOMPONENT: SØK + GRAM-BEREGNING ---
+function AddMealWithSearch({ onAdd }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedFood, setSelectedFood] = useState(null);
+  const [grams, setGrams] = useState(100);
+
+  useEffect(() => {
+    const delay = setTimeout(async () => {
+      if (searchTerm.length > 2) {
+        setLoading(true);
+        try {
+          const res = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${searchTerm}&json=1&page_size=10`);
+          const data = await res.json();
+          setResults(data.products.filter(p => p.nutriments['energy-kcal_100g']));
+        } catch (e) { console.error(e); }
+        setLoading(false);
+      } else { setResults([]); }
+    }, 500);
+    return () => clearTimeout(delay);
+  }, [searchTerm]);
+
+  const handleFinalAdd = () => {
+    const ratio = grams / 100;
+    const meal = {
+      name: `${selectedFood.product_name_nb || selectedFood.product_name} (${grams}g)`,
+      calories: Math.round(selectedFood.nutriments['energy-kcal_100g'] * ratio),
+      protein: Math.round((selectedFood.nutriments.proteins_100g || 0) * ratio),
+      carbs: Math.round((selectedFood.nutriments.carbohydrates_100g || 0) * ratio),
+      fat: Math.round((selectedFood.nutriments.fat_100g || 0) * ratio),
+    };
+    onAdd(meal);
+    setSelectedFood(null);
+    setSearchTerm('');
+    setGrams(100);
+  };
+
+  return (
+    <div style={s.card}>
+      <h3 style={s.cardTitle}>Legg til mat</h3>
+      {!selectedFood ? (
+        <div style={{position:'relative'}}>
+          <Search size={18} style={s.searchIcon} />
+          <input 
+            style={s.searchInput} 
+            placeholder="Søk i matbibliotek..." 
+            value={searchTerm} 
+            onChange={e => setSearchTerm(e.target.value)} 
+          />
+          {loading && <Loader2 size={18} style={s.spinner} />}
+          {results.length > 0 && (
+            <div style={s.resultsDropdown}>
+              {results.map(f => (
+                <div key={f._id} style={s.resultItem} onClick={() => setSelectedFood(f)}>
+                  <div>{f.product_name_nb || f.product_name}</div>
+                  <div style={{fontSize:11, color:'#6b7280'}}>{Math.round(f.nutriments['energy-kcal_100g'])} kcal/100g</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{display:'flex', flexDirection:'column', gap:'15px'}}>
+          <div style={{fontWeight:'bold', color:'#8ab4f8'}}>{selectedFood.product_name_nb || selectedFood.product_name}</div>
+          <div style={s.inputGroup}>
+            <label style={s.label}>Hvor mange gram?</label>
+            <input style={s.input} type="number" value={grams} onChange={e => setGrams(e.target.value)} />
+          </div>
+          <div style={{display:'flex', gap:'10px'}}>
+             <button style={s.primaryBtn} onClick={handleFinalAdd}>Legg til {Math.round(selectedFood.nutriments['energy-kcal_100g'] * (grams/100))} kcal</button>
+             <button style={{...s.primaryBtn, background:'rgba(255,255,255,0.1)', color:'#fff'}} onClick={() => setSelectedFood(null)}>Avbryt</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- STYLES & HJELPEKOMPONENTER ---
+const BackgroundDecor = () => (
+  <>
+    <div style={{ position: 'absolute', top: '-10%', right: '-5%', width: '600px', height: '600px', background: 'radial-gradient(circle, rgba(138, 180, 248, 0.08) 0%, transparent 70%)', borderRadius: '50%', filter: 'blur(60px)', pointerEvents: 'none' }} />
+    <div style={{ position: 'absolute', bottom: '-15%', left: '-10%', width: '500px', height: '500px', background: 'radial-gradient(circle, rgba(248, 180, 138, 0.06) 0%, transparent 70%)', borderRadius: '50%', filter: 'blur(80px)', pointerEvents: 'none' }} />
+  </>
+);
+
+function Header({ onSettingsClick }) {
+  return (
+    <nav style={s.navbar}>
+      <div style={s.navContent}>
+        <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+          <Flame color="#8ab4f8" fill="#8ab4f8" size={28} />
+          <h1 style={s.logo}>COACH<span style={{color:'#f8b48a'}}>PRO</span></h1>
+        </div>
+        <button onClick={onSettingsClick} style={s.settingsBtn}><Settings size={20} /></button>
+      </div>
+    </nav>
+  );
+}
+
+function ProgressCard({ log, goals, progressPercentage }) {
+  return (
+    <div style={s.summaryCard}>
+      <div style={{height:4, background:`linear-gradient(90deg, #8ab4f8 ${progressPercentage(log.calories, goals.dailyCalories)}%, transparent 0%)`, position:'absolute', top:0, left:0, right:0}} />
+      <div style={{display:'flex', justifyContent:'space-between', marginBottom:20}}>
+        <div><div style={s.labelCaps}>Gjenstår i dag</div><div style={s.hugeNumber}>{goals.dailyCalories - log.calories} <span style={{fontSize:16}}>kcal</span></div></div>
+        <Target color="#8ab4f8" size={32} opacity={0.3} />
+      </div>
+      <div style={s.macroGrid}>
+        <MacroMini label="P" cur={log.protein} max={goals.protein} color="#f8b48a" />
+        <MacroMini label="K" cur={log.carbs} max={goals.carbs} color="#8ab4f8" />
+        <MacroMini label="F" cur={log.fat} max={goals.fat} color="#a8f88a" />
+      </div>
+    </div>
+  );
+}
+
+function MacroMini({ label, cur, max, color }) {
   const pct = Math.min((cur / max) * 100, 100);
   return (
-    <div style={s.macroItem}>
-      <div style={s.rowBetween}><span style={{fontSize:11, color:'#9ca3af'}}>{label}</span><span style={{fontSize:11, fontWeight:'bold'}}>{cur}/{max}g</span></div>
-      <div style={s.miniBar}><div style={{...s.miniFill, width:`${pct}%`, background:color}}></div></div>
+    <div>
+      <div style={{display:'flex', justifyContent:'space-between', fontSize:11, marginBottom:4}}>
+        <span style={{color:'#9ca3af'}}>{label}</span>
+        <span>{cur}/{max}g</span>
+      </div>
+      <div style={{height:4, background:'rgba(255,255,255,0.1)', borderRadius:2}}>
+        <div style={{height:'100%', width:`${pct}%`, background:color, borderRadius:2}} />
+      </div>
+    </div>
+  );
+}
+
+function MealList({ entries, onDelete }) {
+  return (
+    <div style={s.card}>
+      <h3 style={s.cardTitle}>Dagens logg</h3>
+      <div style={{display:'flex', flexDirection:'column', gap:10}}>
+        {entries.map(e => (
+          <div key={e.id} style={s.mealItem}>
+            <div>
+              <div style={{fontSize:14, fontWeight:600}}>{e.name}</div>
+              <div style={{fontSize:11, color:'#8ab4f8'}}>{e.calories} kcal • P:{e.protein}g K:{e.carbs}g F:{e.fat}g</div>
+            </div>
+            <button onClick={() => onDelete(e.id)} style={s.deleteBtn}><Trash2 size={14}/></button>
+          </div>
+        ))}
+        {entries.length === 0 && <div style={{textAlign:'center', color:'#4b5563', padding:20}}>Ingen mat logget ennå.</div>}
+      </div>
+    </div>
+  );
+}
+
+function WeightCard({ profile, setProfile, weightLog, setWeightLog }) {
+  const [val, setVal] = useState('');
+  const add = () => {
+    if(!val) return;
+    const entry = { date: new Date().toISOString(), weight: parseFloat(val) };
+    setWeightLog([entry, ...weightLog]);
+    setProfile({...profile, currentWeight: parseFloat(val)});
+    setVal('');
+  };
+  return (
+    <div style={{...s.card, border:'1px solid rgba(248, 180, 138, 0.2)'}}>
+      <h3 style={s.cardTitle}>Kroppsvekt</h3>
+      <div style={{fontSize:32, fontWeight:700, color:'#f8b48a', marginBottom:15}}>{profile.currentWeight} <span style={{fontSize:16, color:'#9ca3af'}}>kg</span></div>
+      <div style={{display:'flex', gap:10}}>
+        <input style={s.input} type="number" placeholder="Ny vekt..." value={val} onChange={e=>setVal(e.target.value)} />
+        <button style={{...s.primaryBtn, marginTop:0, width:'auto'}} onClick={add}>Logg</button>
+      </div>
+    </div>
+  );
+}
+
+function RecommendationCard({ profile, onSync }) {
+  const rec = calculateMacros(profile);
+  return (
+    <div style={{...s.card, border:'1px solid rgba(168, 248, 138, 0.2)'}}>
+      <h3 style={s.cardTitle}>Coach Anbefaling</h3>
+      <div style={{background:'rgba(168, 248, 138, 0.05)', padding:15, borderRadius:12, marginBottom:15}}>
+        <div style={{fontSize:14, color:'#a8f88a', marginBottom:10}}>Mål: {profile.weightGoal}</div>
+        <div style={{fontSize:13}}>Vi anbefaler: <strong>{rec.calories} kcal</strong></div>
+      </div>
+      <button style={s.primaryBtn} onClick={onSync}>Bruk anbefalinger</button>
     </div>
   );
 }
 
 const s = {
-  appContainer: { minHeight: '100vh', background: '#090b11', color: '#f3f4f6', fontFamily: 'Inter, system-ui, sans-serif' },
-  navbar: { background: '#111827', borderBottom: '1px solid #1f2937', padding: '12px 0', position: 'sticky', top: 0, zIndex: 50 },
-  navContent: { maxWidth: '1000px', margin: '0 auto', padding: '0 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  logoGroup: { display: 'flex', alignItems: 'center', gap: '8px' },
-  logoText: { fontSize: '1.1rem', fontWeight: '800', letterSpacing: '0.5px' },
-  navAction: { background: '#1f2937', border: 'none', color: '#9ca3af', padding: '8px', borderRadius: '10px', cursor: 'pointer' },
-  main: { maxWidth: '1000px', margin: '0 auto', padding: '24px 20px' },
-  dashboardGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' },
-  column: { display: 'flex', flexDirection: 'column', gap: '24px' },
-  card: { background: '#111827', borderRadius: '20px', padding: '20px', border: '1px solid #1f2937', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' },
-  summaryCard: { background: 'linear-gradient(135deg, #111827 0%, #1a2233 100%)', borderRadius: '24px', padding: '24px', border: '1px solid #1f2937', position: 'relative', overflow: 'hidden' },
-  hugeNumber: { fontSize: '3.5rem', fontWeight: '900', margin: '8px 0', letterSpacing: '-2px' },
-  unit: { fontSize: '1rem', color: '#6b7280', letterSpacing: '0' },
-  labelCaps: { fontSize: '0.7rem', color: '#9ca3af', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' },
-  progressBar: { height: '10px', background: '#1f2937', borderRadius: '10px', margin: '20px 0', overflow: 'hidden' },
-  progressFill: { height: '100%', background: '#a8f88a', borderRadius: '10px', transition: 'width 0.5s ease' },
-  macroStats: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginTop: '10px' },
-  macroItem: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  miniBar: { height: '4px', background: '#1f2937', borderRadius: '2px' },
-  miniFill: { height: '100%', borderRadius: '2px' },
-  searchContainer: { position: 'relative', marginTop: '10px' },
-  searchIcon: { position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#6b7280' },
-  searchInput: { width: '100%', background: '#090b11', border: '1px solid #374151', borderRadius: '12px', padding: '12px 12px 12px 40px', color: '#fff', fontSize: '14px' },
-  resultsBox: { background: '#090b11', borderRadius: '12px', marginTop: '8px', maxHeight: '300px', overflowY: 'auto', border: '1px solid #1f2937' },
-  foodResult: { padding: '12px', borderBottom: '1px solid #1f2937', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' },
-  foodName: { fontSize: '14px', fontWeight: '600' },
-  foodSub: { fontSize: '11px', color: '#6b7280' },
-  logList: { marginTop: '15px', display: 'flex', flexDirection: 'column', gap: '10px' },
-  logItem: { background: '#1f2937', padding: '12px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  logMacros: { fontSize: '12px', color: '#a8f88a', marginTop: '2px' },
-  deleteBtn: { background: 'none', border: 'none', color: '#4b5563', cursor: 'pointer', padding: '5px' },
-  emptyState: { padding: '40px 0', textAlign: 'center', color: '#4b5563', fontSize: '14px' },
-  onboardingWrapper: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#090b11', padding: '20px' },
-  onboardCard: { background: '#111827', padding: '40px', borderRadius: '32px', border: '1px solid #1f2937', maxWidth: '450px', width: '100%', textAlign: 'center' },
-  brandIcon: { marginBottom: '20px' },
-  title: { fontSize: '2rem', fontWeight: '900', marginBottom: '10px' },
-  subText: { color: '#9ca3af', marginBottom: '30px' },
-  inputGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', textAlign: 'left' },
-  primaryBtn: { width: '100%', background: '#a8f88a', color: '#064e3b', border: 'none', padding: '16px', borderRadius: '14px', fontWeight: '800', fontSize: '1rem', cursor: 'pointer', marginTop: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
-  dangerBtn: { width: '100%', background: '#7f1d1d33', color: '#f87171', border: 'none', padding: '12px', borderRadius: '12px', cursor: 'pointer', marginTop: '10px' }
+  appWrapper: { minHeight: '100vh', background: '#0a0e1a', color: '#e8e6e1', fontFamily: 'Inter, system-ui, sans-serif', position:'relative', overflowX:'hidden' },
+  mainContainer: { maxWidth: '1000px', margin: '0 auto', padding: '2rem' },
+  navbar: { background: 'rgba(15, 20, 25, 0.6)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(138, 180, 248, 0.1)', padding: '1rem 2rem', sticky: 'top', zIndex: 100 },
+  navContent: { maxWidth: '1000px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  logo: { fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-1px' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem' },
+  column: { display: 'flex', flexDirection: 'column', gap: '1.5rem' },
+  card: { background: 'rgba(26, 31, 46, 0.5)', backdropFilter: 'blur(10px)', borderRadius: '20px', padding: '1.5rem', border: '1px solid rgba(138, 180, 248, 0.15)' },
+  summaryCard: { background: 'rgba(26, 31, 46, 0.8)', borderRadius: '20px', padding: '2rem', border: '1px solid rgba(138, 180, 248, 0.15)', position: 'relative', overflow: 'hidden' },
+  cardTitle: { fontSize: '1.1rem', fontWeight: 600, marginBottom: '1.2rem', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '1px' },
+  hugeNumber: { fontSize: '3rem', fontWeight: 700, color: '#8ab4f8' },
+  labelCaps: { fontSize: '0.75rem', color: '#9ca3af', fontWeight: 700 },
+  macroGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' },
+  input: { background: 'rgba(15, 20, 25, 0.5)', border: '1px solid rgba(138, 180, 248, 0.2)', borderRadius: '10px', padding: '0.8rem', color: '#fff', width: '100%' },
+  primaryBtn: { background: 'linear-gradient(135deg, #8ab4f8 0%, #6a94d8 100%)', border: 'none', borderRadius: '10px', padding: '0.8rem 1.5rem', color: '#0a0e1a', fontWeight: 700, cursor: 'pointer', marginTop: '10px', width: '100%' },
+  searchInput: { width: '100%', background: 'rgba(15, 20, 25, 0.5)', border: '1px solid rgba(138, 180, 248, 0.2)', borderRadius: '12px', padding: '12px 12px 12px 40px', color: '#fff' },
+  searchIcon: { position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#6b7280' },
+  spinner: { position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', animation: 'spin 1s linear infinite' },
+  resultsDropdown: { position: 'absolute', top: '100%', left: 0, right: 0, background: '#1a1f2e', borderRadius: '0 0 12px 12px', zIndex: 10, maxHeight: 200, overflowY: 'auto', border: '1px solid #374151' },
+  resultItem: { padding: '10px 15px', borderBottom: '1px solid #374151', cursor: 'pointer' },
+  mealItem: { background: 'rgba(15, 20, 25, 0.4)', padding: '12px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  deleteBtn: { background: 'none', border: 'none', color: '#4b5563', cursor: 'pointer' },
+  settingsBtn: { background: 'rgba(138, 180, 248, 0.1)', border: 'none', color: '#8ab4f8', padding: '10px', borderRadius: '12px', cursor: 'pointer' }
 };
