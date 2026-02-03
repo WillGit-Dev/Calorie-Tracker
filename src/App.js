@@ -98,7 +98,7 @@ export default function App() {
         }
       } catch (e) { console.error(e); } finally { setIsSearching(false); }
     };
-    const tid = setTimeout(searchFood, 500);
+    const tid = setTimeout(searchFood, 100);
     return () => clearTimeout(tid);
   }, [searchTerm]);
 
@@ -366,3 +366,4 @@ export default function App() {
     </div>
   );
 }
+
