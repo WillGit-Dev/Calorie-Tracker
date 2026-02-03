@@ -60,7 +60,6 @@ export default function App() {
   const todayKey = new Date().toDateString();
   const todayLog = history[todayKey] || { calories: 0, protein: 0, carbs: 0, fat: 0, entries: [] };
 
-  // Beregn aktive mål
   const activeTargets = useMemo(() => {
     if (userProfile.isManual) {
       return {
@@ -73,13 +72,16 @@ export default function App() {
     return getBaseCoachMacros(userProfile);
   }, [userProfile]);
 
+  // Kalkuler rest-verdier (kan bli negative)
+  const caloriesRemaining = activeTargets.calories - todayLog.calories;
+  const isOverGoal = caloriesRemaining < 0;
+
   useEffect(() => {
     localStorage.setItem('userProfile', JSON.stringify(userProfile));
     localStorage.setItem('calorieHistory', JSON.stringify(history));
     localStorage.setItem('weightLog', JSON.stringify(weightLog));
   }, [userProfile, history, weightLog]);
 
-  // Mat-søk mot OpenFoodFacts
   useEffect(() => {
     const searchFood = async () => {
       if (searchTerm.length < 2) { setSearchResults([]); return; }
@@ -98,7 +100,7 @@ export default function App() {
         }
       } catch (e) { console.error(e); } finally { setIsSearching(false); }
     };
-    const tid = setTimeout(searchFood, 100);
+    const tid = setTimeout(searchFood, 100); // Din endring til 100ms
     return () => clearTimeout(tid);
   }, [searchTerm]);
 
@@ -159,14 +161,16 @@ export default function App() {
 
       <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-5 space-y-6">
-          {/* DASHBOARD */}
+          {/* DASHBOARD - OPPDATERT MED NEGATIVE TALL */}
           <section className="bg-[#161b22] border border-slate-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
             <div className="flex justify-between items-end mb-6 relative z-10">
               <div>
-                <p className="text-slate-500 text-[10px] uppercase font-black mb-1 tracking-widest">Gjenstår i dag</p>
-                <h2 className="text-6xl font-black text-white leading-none">
-                  {Math.max(0, activeTargets.calories - todayLog.calories)}
-                  <span className="text-base text-blue-500 ml-2 font-bold uppercase">kcal</span>
+                <p className={`text-[10px] uppercase font-black mb-1 tracking-widest ${isOverGoal ? 'text-red-500' : 'text-slate-500'}`}>
+                  {isOverGoal ? 'Over målet i dag' : 'Gjenstår i dag'}
+                </p>
+                <h2 className={`text-6xl font-black leading-none transition-colors ${isOverGoal ? 'text-red-500' : 'text-white'}`}>
+                  {caloriesRemaining}
+                  <span className={`text-base ml-2 font-bold uppercase ${isOverGoal ? 'text-red-500' : 'text-blue-500'}`}>kcal</span>
                 </h2>
               </div>
               <button onClick={() => updateToday({calories:0,protein:0,carbs:0,fat:0,entries:[]})} className="p-2 text-slate-700 hover:text-red-500 transition-colors"><Trash2 size={20}/></button>
@@ -180,16 +184,18 @@ export default function App() {
               ].map((x) => (
                 <div key={x.l} className="bg-[#0d1117] rounded-2xl p-4 border border-slate-800/50">
                   <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">{x.l}</p>
-                  <p className="text-sm font-black text-slate-100">{x.v}<span className="text-slate-600 font-medium"> / {x.m}g</span></p>
+                  <p className={`text-sm font-black ${x.v > x.m ? 'text-red-500' : 'text-slate-100'}`}>
+                    {x.v}<span className="text-slate-600 font-medium"> / {x.m}g</span>
+                  </p>
                   <div className="h-1 bg-slate-800 rounded-full mt-2 overflow-hidden">
-                    <div className={`h-full ${x.c} transition-all duration-500`} style={{ width: `${Math.min(100, (x.v/x.m)*100)}%` }} />
+                    <div className={`h-full ${x.v > x.m ? 'bg-red-500' : x.c} transition-all duration-500`} style={{ width: `${Math.min(100, (x.v/x.m)*100)}%` }} />
                   </div>
                 </div>
               ))}
             </div>
           </section>
 
-          {/* MAT-INNTASTING */}
+          {/* MAT-INNTASTING (Uendret logikk) */}
           <div className="space-y-4">
             <div className="flex bg-[#161b22] p-1 rounded-2xl border border-slate-800">
               {mealCategories.map(cat => (
@@ -300,7 +306,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* MODAL - INNSTILLINGER MED MANUELL OVERSTYRING */}
+      {/* MODAL - INNSTILLINGER */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[200] flex items-center justify-center p-4">
           <div className="bg-[#161b22] border border-slate-700 w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto">
@@ -366,4 +372,3 @@ export default function App() {
     </div>
   );
 }
-
