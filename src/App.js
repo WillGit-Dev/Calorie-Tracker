@@ -7,8 +7,8 @@ import {
   Tooltip, ResponsiveContainer, BarChart, Bar
 } from 'recharts';
 
-// --- BEREGNINGER ---
-const calculateCoachRecommendation = (profile) => {
+// --- LOGIKK FOR BEREGNINGER ---
+const getBaseCoachMacros = (profile) => {
   const bmr = profile.gender === 'male'
     ? 10 * profile.currentWeight + 6.25 * profile.height - 5 * profile.age + 5
     : 10 * profile.currentWeight + 6.25 * profile.height - 5 * profile.age - 161;
@@ -17,21 +17,22 @@ const calculateCoachRecommendation = (profile) => {
   const adjustment = profile.weightGoal === 'lose' ? -500 : profile.weightGoal === 'gain' ? 300 : 0;
   const cals = Math.round(tdee + adjustment);
   
-  // Standard coach-anbefaling for makroer
-  const protein = Math.round(profile.currentWeight * 2);
-  const fat = Math.round(profile.currentWeight * 0.8);
-  const carbs = Math.round((cals - (protein * 4 + fat * 9)) / 4);
-  return { calories: cals, protein, carbs, fat };
+  return {
+    calories: cals,
+    protein: Math.round(profile.currentWeight * 2),
+    fat: Math.round(profile.currentWeight * 0.8),
+    carbs: Math.round((cals - (Math.round(profile.currentWeight * 2) * 4 + Math.round(profile.currentWeight * 0.8) * 9)) / 4)
+  };
 };
 
 export default function App() {
+  // --- STATE ---
   const [userProfile, setUserProfile] = useState(() => {
     const saved = localStorage.getItem('userProfile');
     return saved ? JSON.parse(saved) : {
-      weightGoal: 'maintain', currentWeight: 80, height: 180, age: 25, 
-      gender: 'male', activityLevel: 'moderate',
-      // Brukeren kan overstyre coach-verdiene her
-      customProtein: 160, customCarbs: 250, customFat: 70
+      weightGoal: 'maintain', currentWeight: 99, height: 180, age: 25, 
+      gender: 'male', activityLevel: 'moderate', isManual: false,
+      manualProtein: 180, manualCarbs: 400, manualFat: 80
     };
   });
 
@@ -42,7 +43,7 @@ export default function App() {
 
   const [weightLog, setWeightLog] = useState(() => {
     const saved = localStorage.getItem('weightLog');
-    return saved ? JSON.parse(saved) : [{ date: new Date().toLocaleDateString('no-NO'), weight: 80 }];
+    return saved ? JSON.parse(saved) : [{ date: new Date().toLocaleDateString('no-NO'), weight: 99 }];
   });
 
   const [timeframe, setTimeframe] = useState('week');
@@ -66,7 +67,20 @@ export default function App() {
     localStorage.setItem('weightLog', JSON.stringify(weightLog));
   }, [userProfile, history, weightLog]);
 
-  // Søkefunksjon
+  // Beregn aktive mål basert på om man er i "Coach" eller "Manuell" modus
+  const activeTargets = useMemo(() => {
+    if (userProfile.isManual) {
+      return {
+        protein: userProfile.manualProtein,
+        carbs: userProfile.manualCarbs,
+        fat: userProfile.manualFat,
+        calories: (userProfile.manualProtein * 4) + (userProfile.manualCarbs * 4) + (userProfile.manualFat * 9)
+      };
+    }
+    return getBaseCoachMacros(userProfile);
+  }, [userProfile]);
+
+  // Mat-søk
   useEffect(() => {
     const searchFood = async () => {
       if (searchTerm.length < 2) { setSearchResults([]); return; }
@@ -89,12 +103,7 @@ export default function App() {
     return () => clearTimeout(tid);
   }, [searchTerm]);
 
-  // Beregn totale mål basert på brukerens manuelle justeringer
-  const totalTargetCalories = (userProfile.customProtein * 4) + (userProfile.customCarbs * 4) + (userProfile.customFat * 9);
-
-  const updateToday = (newLog) => {
-    setHistory(prev => ({ ...prev, [todayKey]: newLog }));
-  };
+  const updateToday = (newLog) => setHistory(prev => ({ ...prev, [todayKey]: newLog }));
 
   const addMeal = (customMeal = null) => {
     let meal;
@@ -126,8 +135,7 @@ export default function App() {
   const chartData = useMemo(() => {
     const data = [];
     const now = new Date();
-    let days = timeframe === 'week' ? 7 : timeframe === 'month' ? 30 : 365;
-    for (let i = days - 1; i >= 0; i--) {
+    for (let i = 6; i >= 0; i--) {
       const d = new Date(); d.setDate(now.getDate() - i);
       const key = d.toDateString();
       data.push({
@@ -136,7 +144,7 @@ export default function App() {
       });
     }
     return data;
-  }, [history, timeframe]);
+  }, [history]);
 
   const mealCategories = ['Frokost', 'Lunsj', 'Middag', 'Snacks'];
 
@@ -145,20 +153,20 @@ export default function App() {
       <header className="max-w-6xl mx-auto flex justify-between items-center mb-8">
         <div className="flex items-center gap-2">
           <div className="bg-blue-600 p-2 rounded-lg font-bold"><Activity size={20}/></div>
-          <h1 className="text-xl font-bold text-white tracking-tighter">COACH<span className="text-blue-500">PRO</span></h1>
+          <h1 className="text-xl font-bold text-white tracking-tighter uppercase">Coach<span className="text-blue-500">Pro</span></h1>
         </div>
         <button onClick={() => setShowSettings(true)} className="p-2 bg-[#161b22] border border-slate-800 rounded-full hover:border-blue-500 transition-colors"><Settings size={20}/></button>
       </header>
 
       <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-5 space-y-6">
-          {/* DASHBOARD */}
+          {/* DASHBOARD (FRA BILDENE DINE) */}
           <section className="bg-[#161b22] border border-slate-800 rounded-3xl p-6 shadow-xl">
             <div className="flex justify-between items-end mb-6">
               <div>
                 <p className="text-slate-500 text-[10px] uppercase font-black mb-1 tracking-widest">Gjenstår i dag</p>
                 <h2 className="text-6xl font-black text-white leading-none">
-                  {Math.max(0, totalTargetCalories - todayLog.calories)}
+                  {Math.max(0, activeTargets.calories - todayLog.calories)}
                   <span className="text-base text-blue-500 ml-2 font-bold uppercase">kcal</span>
                 </h2>
               </div>
@@ -167,9 +175,9 @@ export default function App() {
             
             <div className="grid grid-cols-3 gap-3">
               {[
-                { l: 'Protein', v: todayLog.protein, m: userProfile.customProtein, c: 'bg-blue-500' },
-                { l: 'Karbo', v: todayLog.carbs, m: userProfile.customCarbs, c: 'bg-orange-500' },
-                { l: 'Fett', v: todayLog.fat, m: userProfile.customFat, c: 'bg-green-500' }
+                { l: 'Protein', v: todayLog.protein, m: activeTargets.protein, c: 'bg-blue-500' },
+                { l: 'Karbo', v: todayLog.carbs, m: activeTargets.carbs, c: 'bg-orange-500' },
+                { l: 'Fett', v: todayLog.fat, m: activeTargets.fat, c: 'bg-green-500' }
               ].map((x) => (
                 <div key={x.l} className="bg-[#0d1117] rounded-2xl p-4 border border-slate-800/50">
                   <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">{x.l}</p>
@@ -182,28 +190,16 @@ export default function App() {
             </div>
           </section>
 
-          {/* MAT-INNTASTING */}
+          {/* MAT-INNTASTING OG KATEGORIER */}
           <div className="space-y-4">
             <div className="flex bg-[#161b22] p-1 rounded-2xl border border-slate-800">
               {mealCategories.map(cat => (
-                <button 
-                  key={cat} 
-                  onClick={() => setSelectedMealType(cat)}
-                  className={`flex-1 py-2 text-[10px] font-black uppercase rounded-xl transition-all ${selectedMealType === cat ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
-                >
-                  {cat}
-                </button>
+                <button key={cat} onClick={() => setSelectedMealType(cat)} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-xl transition-all ${selectedMealType === cat ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>{cat}</button>
               ))}
             </div>
 
             <div className="relative">
-              <input 
-                type="text" 
-                placeholder={`Søk mat til ${selectedMealType.toLowerCase()}...`}
-                className="w-full bg-[#161b22] border border-slate-800 text-white rounded-2xl py-4 pl-12 focus:ring-2 focus:ring-blue-500 outline-none" 
-                value={searchTerm} 
-                onChange={(e) => setSearchTerm(e.target.value)} 
-              />
+              <input type="text" placeholder={`Søk mat til ${selectedMealType.toLowerCase()}...`} className="w-full bg-[#161b22] border border-slate-800 text-white rounded-2xl py-4 pl-12 focus:ring-2 focus:ring-blue-500 outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
               <Search className="absolute left-4 top-4 text-slate-500" size={18} />
               {searchResults.length > 0 && (
                 <div className="absolute top-full left-0 right-0 mt-2 bg-[#1c2128] border border-slate-700 rounded-2xl shadow-2xl z-[100] max-h-60 overflow-y-auto">
@@ -220,13 +216,13 @@ export default function App() {
             {selectedFood && (
               <div className="bg-blue-600/10 border border-blue-500/50 rounded-2xl p-4 flex gap-4 items-center">
                 <input type="number" className="w-20 bg-[#0d1117] border border-slate-700 rounded-xl p-2 text-white text-center font-bold" value={amount} onChange={(e) => setAmount(parseInt(e.target.value) || 0)} />
-                <span className="text-sm font-bold text-white flex-1">gram {selectedFood.name}</span>
+                <span className="text-sm font-bold text-white flex-1">{selectedFood.name} (g)</span>
                 <button onClick={() => addMeal()} className="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold">Legg til</button>
               </div>
             )}
 
-            <button onClick={() => setShowManualFood(!showManualFood)} className="w-full py-3 text-xs font-black text-slate-500 uppercase tracking-widest border-2 border-dashed border-slate-800 rounded-2xl hover:border-blue-500/50">
-              {showManualFood ? "Lukk meny" : "+ Legg til verdier manuelt"}
+            <button onClick={() => setShowManualFood(!showManualFood)} className="w-full py-3 text-xs font-black text-slate-500 uppercase tracking-widest border-2 border-dashed border-slate-800 rounded-2xl">
+              {showManualFood ? "Lukk meny" : "+ Legg til mat manuelt"}
             </button>
 
             {showManualFood && (
@@ -235,20 +231,18 @@ export default function App() {
                 <input type="number" placeholder="Protein (g)" className="bg-[#0d1117] border border-slate-800 rounded-xl p-3 text-white" value={manualFoodForm.protein} onChange={e => setManualFoodForm({...manualFoodForm, protein: e.target.value})} />
                 <input type="number" placeholder="Karbo (g)" className="bg-[#0d1117] border border-slate-800 rounded-xl p-3 text-white" value={manualFoodForm.carbs} onChange={e => setManualFoodForm({...manualFoodForm, carbs: e.target.value})} />
                 <input type="number" placeholder="Fett (g)" className="bg-[#0d1117] border border-slate-800 rounded-xl p-3 text-white" value={manualFoodForm.fat} onChange={e => setManualFoodForm({...manualFoodForm, fat: e.target.value})} />
-                <button type="submit" className="col-span-2 bg-blue-600 text-white font-black py-4 rounded-xl uppercase text-xs tracking-widest">Legg til i {selectedMealType}</button>
+                <button type="submit" className="col-span-2 bg-blue-600 text-white font-black py-4 rounded-xl uppercase text-xs">Lagre i {selectedMealType}</button>
               </form>
             )}
 
-            <div className="space-y-6 pt-4">
+            <div className="space-y-4 pt-4">
               {mealCategories.map(cat => (
-                <div key={cat} className="space-y-2">
-                  <h3 className="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em] flex items-center gap-2 px-2">
-                    <ChevronDown size={12} /> {cat}
-                  </h3>
+                <div key={cat}>
+                  <h3 className="text-[10px] font-black text-blue-500 uppercase mb-2 px-2 tracking-widest">{cat}</h3>
                   {todayLog.entries.filter(e => e.type === cat).map((entry, idx) => (
-                    <div key={idx} className="flex justify-between items-center p-4 bg-[#161b22] border border-slate-800/50 rounded-2xl">
+                    <div key={idx} className="flex justify-between items-center p-4 bg-[#161b22] border border-slate-800/50 rounded-2xl mb-2">
                       <div><p className="font-bold text-slate-200">{entry.name}</p><p className="text-[10px] text-slate-500 uppercase">P:{entry.protein}g K:{entry.carbs}g F:{entry.fat}g</p></div>
-                      <div className="flex items-center gap-4"><span className="font-black text-blue-500 text-sm">{entry.calories} kcal</span><button onClick={() => updateToday({...todayLog, entries: todayLog.entries.filter(e => e !== entry), calories: todayLog.calories-entry.calories, protein: todayLog.protein-entry.protein, carbs: todayLog.carbs-entry.carbs, fat: todayLog.fat-entry.fat})} className="text-slate-800 hover:text-red-500"><X size={16}/></button></div>
+                      <span className="font-black text-blue-500 text-sm">{entry.calories} kcal</span>
                     </div>
                   ))}
                 </div>
@@ -257,15 +251,14 @@ export default function App() {
           </div>
         </div>
 
-        {/* HØYRE KOLONNE (STATISTIKK OG VEKT) */}
+        {/* HØYRE KOLONNE - STATISTIKK */}
         <div className="lg:col-span-7 space-y-6">
           <section className="bg-[#161b22] border border-slate-800 rounded-3xl p-6 shadow-xl">
-            <h3 className="text-lg font-black text-white mb-6 flex items-center gap-2"><Calendar size={20} className="text-blue-500"/> Kalorihistorikk</h3>
+            <h3 className="text-lg font-black text-white mb-6">Kalorihistorikk</h3>
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData}>
                   <XAxis dataKey="date" stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
-                  <Tooltip cursor={{fill: '#ffffff05'}} contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '12px' }} />
                   <Bar dataKey="kcal" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -292,40 +285,43 @@ export default function App() {
         </div>
       </main>
 
-      {/* MODAL FOR INNSTILLINGER & MAKRO-JUSTERING */}
+      {/* INNSTILLINGER - HER LIGGER BÅDE COACH OG MANUELL */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-          <div className="bg-[#161b22] border border-slate-700 w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+          <div className="bg-[#161b22] border border-slate-700 w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative">
             <button onClick={() => setShowSettings(false)} className="absolute top-8 right-8 text-slate-500 hover:text-white"><X size={24}/></button>
-            <h2 className="text-2xl font-black text-white mb-8 text-center uppercase tracking-tighter">Profil & Mål</h2>
+            <h2 className="text-2xl font-black text-white mb-8 text-center uppercase">Profil & Mål</h2>
             
-            <div className="space-y-8">
+            <div className="space-y-6">
+              <div className="bg-[#0d1117] p-1.5 rounded-2xl flex border border-slate-800 mb-4">
+                <button onClick={() => setUserProfile({...userProfile, isManual: false})} className={`flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all ${!userProfile.isManual ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>Coach (Auto)</button>
+                <button onClick={() => setUserProfile({...userProfile, isManual: true})} className={`flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all ${userProfile.isManual ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>Manuell</button>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Vekt (kg)</label><input type="number" className="w-full bg-[#0d1117] border border-slate-800 rounded-xl p-4 text-white font-bold" value={userProfile.currentWeight} onChange={e => setUserProfile({...userProfile, currentWeight: parseFloat(e.target.value)})} /></div>
                 <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Mål</label><select className="w-full bg-[#0d1117] border border-slate-800 text-white rounded-xl p-4 font-bold outline-none" value={userProfile.weightGoal} onChange={e => setUserProfile({...userProfile, weightGoal: e.target.value})}><option value="lose">Ned i vekt</option><option value="maintain">Hold vekten</option><option value="gain">Opp i vekt</option></select></div>
               </div>
 
-              {/* MANUELL OVERSTYRING AV MAKROER */}
               <div className="space-y-6 bg-[#0d1117] p-6 rounded-3xl border border-slate-800">
                 <h3 className="text-sm font-black text-white text-center uppercase tracking-widest">Juster Makroer</h3>
-                {['Protein', 'Carbs', 'Fat'].map(m => (
-                  <div key={m}>
-                    <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase mb-2">
-                      <span>{m === 'Carbs' ? 'Karbohydrater' : m}</span>
-                      <span className="text-blue-500">{userProfile[`custom${m}`]}g</span>
-                    </div>
-                    <input type="range" min="20" max="500" className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500" value={userProfile[`custom${m}`]} onChange={e => setUserProfile({...userProfile, [`custom${m}`]: parseInt(e.target.value)})} />
+                {[
+                  { id: 'manualProtein', label: 'Protein', val: activeTargets.protein },
+                  { id: 'manualCarbs', label: 'Karbohydrater', val: activeTargets.carbs },
+                  { id: 'manualFat', label: 'Fett', val: activeTargets.fat }
+                ].map(m => (
+                  <div key={m.id}>
+                    <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase mb-2"><span>{m.label}</span><span className="text-blue-500">{userProfile[m.id]}g</span></div>
+                    <input type="range" min="20" max="600" className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500" value={userProfile[m.id]} onChange={e => setUserProfile({...userProfile, [m.id]: parseInt(e.target.value), isManual: true})} />
                   </div>
                 ))}
-                
                 <div className="pt-4 border-t border-slate-800 text-center">
-                  <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Ditt egendefinerte mål</p>
-                  <p className="text-4xl font-black text-white">{totalTargetCalories} <span className="text-xs text-blue-500">kcal</span></p>
-                  <p className="text-[10px] text-slate-600 mt-2 italic">Coach anbefaler: {calculateCoachRecommendation(userProfile).calories} kcal</p>
+                  <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Ditt aktive mål</p>
+                  <p className="text-4xl font-black text-white">{activeTargets.calories} <span className="text-xs text-blue-500 uppercase">kcal</span></p>
                 </div>
               </div>
 
-              <button onClick={() => setShowSettings(false)} className="w-full bg-blue-600 text-white font-black py-5 rounded-2xl shadow-xl uppercase tracking-widest text-xs">Lagre endringer</button>
+              <button onClick={() => setShowSettings(false)} className="w-full bg-blue-600 text-white font-black py-5 rounded-2xl uppercase text-xs tracking-widest">Lagre alle endringer</button>
             </div>
           </div>
         </div>
